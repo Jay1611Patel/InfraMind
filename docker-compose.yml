@@ -1,0 +1,117 @@
+version: '3.8'
+
+services:
+  # Frontend
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    depends_on:
+      - orchestrator
+      - ai-engine
+    networks:
+      - orchestrator-network
+
+  # Go Orchestrator
+  orchestrator:
+    build:
+      context: ./backend/go-orchestrator
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - AI_ENGINE_URL=http://ai-engine:8001
+      - PROMETHEUS_URL=http://prometheus:9090
+    depends_on:
+      - ai-engine
+    networks:
+      - orchestrator-network
+    restart: unless-stopped
+
+  # AI Engine
+  ai-engine:
+    build:
+      context: ./backend/ai-engine
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - PORT=8001
+      - OLLAMA_URL=http://ollama:11434
+      - MODEL_NAME=llama3
+    networks:
+      - orchestrator-network
+    restart: unless-stopped
+
+  # Ollama (Local LLM)
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - orchestrator-network
+    restart: unless-stopped
+
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - orchestrator-network
+    restart: unless-stopped
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - orchestrator-network
+    restart: unless-stopped
+
+  # LocalStack (AWS emulator)
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"
+      - "4571:4571"
+    environment:
+      - SERVICES=s3,ec2,rds,elasticache
+      - DEBUG=1
+      - DATA_DIR=/tmp/localstack/data
+    volumes:
+      - localstack-data:/tmp/localstack
+    networks:
+      - orchestrator-network
+    restart: unless-stopped
+
+volumes:
+  ollama-data:
+  prometheus-data:
+  grafana-data:
+  localstack-data:
+
+networks:
+  orchestrator-network:
+    driver: bridge
